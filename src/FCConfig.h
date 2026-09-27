@@ -97,6 +97,16 @@
 #   error "FreeCAD is not ported to this OS yet. For help see www.freecad.org"
 #endif
 
+// FC_IF_THREADS(code) / FC_IF_NO_THREADS(code): for one-line differences
+// between builds with and without threads (FC_NO_THREADS, WebAssembly).
+#ifdef FC_NO_THREADS
+#   define FC_IF_THREADS(...)
+#   define FC_IF_NO_THREADS(...) __VA_ARGS__
+#else
+#   define FC_IF_THREADS(...) __VA_ARGS__
+#   define FC_IF_NO_THREADS(...)
+#endif
+
 #ifdef FC_OS_WIN32
 #   define PATHSEP '\\'
 #else

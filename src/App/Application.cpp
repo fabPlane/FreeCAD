@@ -402,9 +402,7 @@ Application::Application(std::map<std::string,std::string> &mConfig)
     mpcPramManager["User parameter"] = _pcUserParamMngr;
 
     _stopRecomputeThread = false;
-#ifndef FC_NO_THREADS
-    _recomputeThread = std::thread(&Application::recomputeWorker, this);
-#endif
+    FC_IF_THREADS(_recomputeThread = std::thread(&Application::recomputeWorker, this);)
 
     setupPythonTypes();
 }
@@ -810,10 +808,7 @@ bool Application::isAsyncRecomputeEnabled()
         "User parameter:BaseApp/Preferences/Document"
     );
     bool enableAsyncRecompute = hGrp->GetBool("EnableAsyncRecompute", true);
-#ifdef FC_NO_THREADS
-    enableAsyncRecompute = false;  // no recompute worker thread
-#endif
-    return enableAsyncRecompute;
+    return FC_IF_NO_THREADS(false &&) enableAsyncRecompute;
 }
 
 bool Application::isFineGrainedRecomputeEnabled()
@@ -837,13 +832,7 @@ bool Application::canRecomputeRequestOnWorker(const RecomputeRequest& req) const
 
 void Application::queueRecomputeRequest(RecomputeRequest req)
 {
-#ifdef FC_NO_THREADS
-    // No worker thread (see the constructor): every request is processed
-    // inline, exactly like the not-worker-safe ones below.
-    if (true) {
-#else
-    if (!canRecomputeRequestOnWorker(req)) {
-#endif
+    if (FC_IF_NO_THREADS(true ||) !canRecomputeRequestOnWorker(req)) {  // no worker: inline
         RecomputeResult result;
 
         // Requests that are not worker-safe stay on the caller thread unless a
