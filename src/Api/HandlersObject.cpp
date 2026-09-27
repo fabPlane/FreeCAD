@@ -375,7 +375,7 @@ void registerObjectCommands(Server& server)
             const std::string type = requireString(params, "type");
             const std::string name = requireString(params, "name");
             const std::string group = optionalString(params, "group", "Base");
-            const std::string tooltip = optionalString(params, "doc");
+            const std::string tooltip = optionalString(params, "documentation");
             AutoTransaction transaction(doc, "Add property " + name);
             App::Property* prop
                 = obj->addDynamicProperty(type, name.c_str(), group.c_str(), tooltip.c_str());

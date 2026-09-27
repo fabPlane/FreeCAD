@@ -98,6 +98,13 @@ runs are sent **after** that request's reply. `seq` increases by one per event, 
 
 `ObjectChanged` is coalesced per request: one event per (object, property) pair.
 
+Events are encoded like the connection's last request (JSON before the first one). Every
+WebSocket connection receives every event. The C ABI encodes them with its `eventEncoding`
+setting (default CBOR) and delivers them *before* `fcapi_dispatch` returns; an in-process
+client buffers them until it has handled the reply, which restores the order above.
+
+A message that cannot be parsed at all is answered with `id: null` and `BAD_REQUEST`.
+
 ## Values
 
 Property values travel as JSON with a few tagged forms for FreeCAD types. The same form is
@@ -170,11 +177,13 @@ object's internal name (not its label).
 | `SetExpression`  | `{doc, object, path, expression}` (`null` clears) | `null`                             |
 | `AddObject`      | `{doc, type, name?, label?, properties?, group?}` | `ObjectInfo`                       |
 | `RemoveObject`   | `{doc, object, recursive?}`                       | `null`                             |
-| `AddProperty`    | `{doc, object, type, name, group?, doc?}`         | `PropertyInfo`                     |
+| `AddProperty`    | `{doc, object, type, name, group?, documentation?}` | `PropertyInfo`                   |
 | `RemoveProperty` | `{doc, object, name}`                             | `null`                             |
 
 `ObjectInfo` = `{name, label, type, typeHierarchy, isGeo, isValid, isTouched, isError, status,
-inList, outList, children, parents, visibility, bbox?}`. `children` is the object's claimed
+inList, outList, children, parents, visibility, bbox?}`. `status` is FreeCAD's status string
+(`Valid`, `Touched` or the error text); `typeHierarchy` runs from the type up to, not
+including, `Base::BaseClass`. `GetObject` takes `properties: true` to include `properties`. `children` is the object's claimed
 children (what the tree view nests under it: group members, a sketch's parent body, …).
 `bbox` is `{min:[x,y,z], max:[x,y,z]}` for objects with geometry.
 
@@ -191,6 +200,8 @@ children (what the tree view nests under it: group members, a sketch's parent bo
 
 `Tessellation` = `{object, placement, revision, deflection, positions, indices, faces, edges,
 edgePositions, vertices}`:
+
+All array fields are bytes (never JSON arrays):
 
 - `positions` — float32 x,y,z triples (bytes, little-endian), in the **global** frame;
 - `indices` — uint32 triangle indices (bytes); `faces` — per sub-face `[firstTriangle,
