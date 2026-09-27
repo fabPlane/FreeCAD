@@ -164,7 +164,7 @@ static void writeRawBufferPOSIX(std::uint32_t fileSize)
     // Raw syscalls only!!
     int fd = open(crashReportFilePOSIX, O_WRONLY | O_CREAT | O_TRUNC, 0600);
     if (fd != -1) {
-# if defined(FC_OS_LINUX)
+# if defined(FC_OS_LINUX) && !defined(FC_OS_WASM)  // no fallocate in Emscripten's libc
         // Advisory, and a bare syscall wrapper so it is signal-safe.
         fallocate(fd, 0, 0, fileSize);
 # endif
