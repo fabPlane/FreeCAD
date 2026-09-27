@@ -9,6 +9,18 @@
 #                       JS+wasm module (BUILD_API=ON)
 
 # --------------------------------------------------------------------------
+# Qt's link options
+# --------------------------------------------------------------------------
+# A wasm Qt puts its idea of an *application* on every executable linking
+# Qt6::Core: -sMODULARIZE=1 -sEXPORT_NAME=createQtAppInstance, -sFETCH=1,
+# WebGL, ASYNCIFY imports (Qt6::Platform's INTERFACE_LINK_OPTIONS).  They come
+# after ours on the link line, so they win - freecad_wasm_smoke silently
+# became a factory nobody calls.  These targets own their link flags.
+if(TARGET Qt6::Platform)
+    set_property(TARGET Qt6::Platform PROPERTY INTERFACE_LINK_OPTIONS "")
+endif()
+
+# --------------------------------------------------------------------------
 # built-in Python modules
 # --------------------------------------------------------------------------
 # src/Mod/<dir>  ->  CMake target ; Python module name (PyInit_<name>)
@@ -73,13 +85,15 @@ get_filename_component(_fc_wasm_pyzip_name "${FREECAD_WASM_PYTHON_STDLIB_ZIP}" N
 get_filename_component(_fc_wasm_icu_name "${FREECAD_WASM_ICU_DATA}" NAME)
 
 # The MEMFS image, /freecad: FreeCAD's Mod/ and Ext/ trees as they are laid
-# out in the build directory (Python sources, material cards, ...), the
-# stdlib zip and the ICU data.  Compiled module archives never land there
+# out in the build directory (Python sources, ...), share/Mod (the resource
+# directory, RESOURCEDIR=share: material cards and models - Part::Feature
+# needs the default material), the stdlib zip and the ICU data.  Compiled module archives never land there
 # (static libraries go to ARCHIVE_OUTPUT_DIRECTORY, i.e. next to their
 # sources), but exclude the usual suspects anyway.
 set(FREECAD_WASM_PRELOAD_FLAGS
     "SHELL:--preload-file ${CMAKE_BINARY_DIR}/Mod@/freecad/Mod"
     "SHELL:--preload-file ${CMAKE_BINARY_DIR}/Ext@/freecad/Ext"
+    "SHELL:--preload-file ${CMAKE_BINARY_DIR}/share/Mod@/freecad/share/Mod"
     "SHELL:--preload-file ${FREECAD_WASM_PYTHON_STDLIB_ZIP}@/freecad/lib/${_fc_wasm_pyzip_name}"
     "SHELL:--preload-file ${FREECAD_WASM_ICU_DATA}@/freecad/share/icu/${_fc_wasm_icu_name}"
     "SHELL:--exclude-file *.a"

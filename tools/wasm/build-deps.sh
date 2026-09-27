@@ -9,7 +9,7 @@
 #   tools/wasm/build-deps.sh list         # stages and whether each is done
 #
 # Stages (in dependency order):
-#   zlib eigen fmt yamlcpp icu xerces boost python qt occt freetype harfbuzz
+#   zlib eigen fmt yamlcpp icu icudata xerces boost python qt occt freetype harfbuzz
 #
 # Everything lands under $WASM_ROOT (default /home/user/wasm-build, see env.sh):
 #   src/      downloaded tarballs (kept; they are the only thing re-used)
@@ -38,9 +38,9 @@
 #
 #  3. ICU is required by FreeCAD's Base (NumericFormatting uses
 #     icu::DecimalFormat).  Its data is NOT compiled into the library
-#     (--with-data-packaging=archive): we ship icudt74l.dat trimmed to the
-#     root/en locales with the host's icupkg, and FreeCAD finds it through
-#     ICU_DATA at run time.  The cross build needs a native ICU build of the
+#     (--with-data-packaging=archive): stage icudata ships icudt74l.dat
+#     trimmed to root/en (trim-icu-data.sh, 30 MB -> 2.6 MB) with the host's
+#     icupkg, and FreeCAD finds it through ICU_DATA at run time.  The cross build needs a native ICU build of the
 #     same version (--with-cross-build); it is built first in build/icu-host.
 #
 #  4. Xerces-C uses ICU as its transcoder, not iconv: musl starts in the "C"
@@ -290,32 +290,25 @@ stage_icu() {
       run icu-build emmake make -j"$JOBS" &&
       run icu-install emmake make install )
 
-    # 3. trimmed data: only the root/en locales and the locale-independent
-    #    tables survive.  FreeCAD looks up number symbols for the C/en_US_POSIX
-    #    locale only; everything else falls back to root.
-    local dat="$src/data/in/icudt${ICU_MAJOR}l.dat"
-    local icupkg="$WASM_BLD/icu-host/bin/icupkg"
-    local out="$WASM_PREFIX/share/icu/icudt${ICU_MAJOR}l.dat"
-    mkdir -p "$WASM_PREFIX/share/icu"
-    "$icupkg" -l "$dat" > "$WASM_BLD/icu-items.txt"
-    # keep: everything that is not a per-locale resource bundle, plus root/en*
-    # bundles.  Removed: coll/ (collation), brkitr/ dictionaries, zone/, curr/,
-    # lang/, region/, unit/, rbnf/, translit/, and every non-English locale.
-    grep -E '^(coll|brkitr|zone|curr|lang|region|unit|rbnf|translit)/' "$WASM_BLD/icu-items.txt" \
-        > "$WASM_BLD/icu-remove.txt" || true
-    grep -vE '/' "$WASM_BLD/icu-items.txt" | grep -E '\.res$' \
-        | grep -vE '^(root|en|en_US|en_US_POSIX|pool|res_index|supplementalData|numberingSystems|metadata|likelySubtags|metaZones|timezoneTypes|windowsZones|keyTypeData|plurals|dayPeriods|grammaticalFeatures|genderList|icuver|icustd|tzdbNames|units|pluralRanges|zoneinfo64|characterProperties)\.res$' \
-        >> "$WASM_BLD/icu-remove.txt" || true
-    cp "$dat" "$out"
-    "$icupkg" -r "$WASM_BLD/icu-remove.txt" "$out" > "$WASM_LOGS/icu-trim.log" 2>&1
-    echo "icu data: $( du -h "$dat" | cut -f1 ) -> $( du -h "$out" | cut -f1 ) ($out)"
-
     # keep the host tools that are handy later (icupkg for re-trimming)
     mkdir -p "$WASM_HOST_PREFIX/bin"
     cp "$icupkg" "$WASM_HOST_PREFIX/bin/"
 
     ls "$WASM_PREFIX/lib/libicuuc.a" "$WASM_PREFIX/lib/libicui18n.a" >/dev/null
     cleanup icu icu-host icu-wasm
+}
+
+# The data archive, trimmed (trim-icu-data.sh) and installed as
+# $WASM_PREFIX/share/icu/icudt<N>l.dat.  Needs the host icupkg the icu stage
+# leaves in $WASM_HOST_PREFIX/bin.
+stage_icudata() {
+    local dat="icu/source/data/in/icudt${ICU_MAJOR}l.dat"
+    rm -rf "$WASM_BLD/icudata"; mkdir -p "$WASM_BLD/icudata" "$WASM_PREFIX/share/icu"
+    tar xzf "$WASM_SRC/icu4c-$ICU_U-src.tgz" -C "$WASM_BLD/icudata" "$dat"
+    local out="$WASM_PREFIX/share/icu/icudt${ICU_MAJOR}l.dat"
+    "$HERE/trim-icu-data.sh" "$WASM_HOST_PREFIX/bin/icupkg" "$WASM_BLD/icudata/$dat" "$out" "$WASM_BLD/icudata"
+    echo "icu data: $( du -h "$WASM_BLD/icudata/$dat" | cut -f1 ) -> $( du -h "$out" | cut -f1 ) ($out)"
+    cleanup icudata
 }
 
 # ---------------------------------------------------------------------------
@@ -539,7 +532,7 @@ stage_harfbuzz() {
 # ---------------------------------------------------------------------------
 # driver
 # ---------------------------------------------------------------------------
-ALL_STAGES=(zlib eigen fmt yamlcpp icu xerces boost python qt occt freetype harfbuzz)
+ALL_STAGES=(zlib eigen fmt yamlcpp icu icudata xerces boost python qt occt freetype harfbuzz)
 STAGES=( "${@:-}" )
 [ -z "${STAGES[0]:-}" ] && STAGES=( "${ALL_STAGES[@]}" )
 

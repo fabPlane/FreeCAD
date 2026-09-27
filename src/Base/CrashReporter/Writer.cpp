@@ -459,6 +459,11 @@ void Writer::install(const std::string& crashReportDirectory)
     // On POSIX systems, if a SEGFAULT was triggered because we ran out of space on the stack,
     // it's possible to use an alternate stack for the signal handler. If we don't then, the attempt
     // to process the signal would itself trigger a secondary fault, causing an immediate abort.
+#if defined(FC_CRASHREPORTER_POSIX) && defined(FC_OS_WASM)
+    // WebAssembly: no signal ever reaches wasm code (a trap aborts the
+    // instance), and Emscripten has no sigaltstack - nothing to install.
+    return;
+#endif
 #ifdef FC_CRASHREPORTER_POSIX
     // https://man7.org/linux/man-pages/man2/sigaltstack.2.html
     stack_t ss {};
