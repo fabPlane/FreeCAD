@@ -1,7 +1,13 @@
 # -------------------------------- Qt --------------------------------
 
 # LinguistTools is needed without the GUI too: src/App compiles its translations.
-set(FREECAD_QT_COMPONENTS Core Concurrent Network Xml LinguistTools)
+if(FREECAD_WASM)
+    # A WebAssembly Qt without threads has no QFuture and therefore no Qt
+    # Concurrent, and the application core does not use Qt Network.
+    set(FREECAD_QT_COMPONENTS Core Xml LinguistTools)
+else()
+    set(FREECAD_QT_COMPONENTS Core Concurrent Network Xml LinguistTools)
+endif()
 set(Qt6Core_MOC_EXECUTABLE Qt6::moc)
 
 if(BUILD_GUI)

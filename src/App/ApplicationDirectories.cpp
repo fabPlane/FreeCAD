@@ -657,7 +657,25 @@ ApplicationDirectories::MigrationResult ApplicationDirectories::migrateAllPaths(
 }
 
 // TODO: Consider using this for all UNIX-like OSes
-#if defined(__OpenBSD__)
+#if defined(FC_OS_WASM)
+#include <cstdlib>
+
+fs::path ApplicationDirectories::findHomePath(const char* /*sCall*/)
+{
+    // WebAssembly: there is no executable on a disk (and no /proc/self/exe).
+    // The home path is the MEMFS directory the module's data was mounted at:
+    // $FREECAD_HOME, or /freecad/ (see tools/wasm/README.md).
+    std::string homePath = "/freecad/";
+    if (const char* env = std::getenv("FREECAD_HOME"); env && *env) {
+        homePath = env;
+        if (homePath.back() != '/') {
+            homePath += '/';
+        }
+    }
+    return Base::FileInfo::stringToPath(homePath);
+}
+
+#elif defined(__OpenBSD__)
 #include <cstdio>
 #include <cstdlib>
 #include <sys/param.h>

@@ -59,6 +59,20 @@
 #   ifndef FC_OS_LINUX
 #   define FC_OS_LINUX
 #   endif
+#elif defined(__EMSCRIPTEN__)
+// WebAssembly (FREECAD_WASM, see tools/wasm/).  Emscripten's libc is musl, so
+// the POSIX/Linux code paths apply; FC_OS_WASM marks the few places that have
+// to differ (no /proc, no dlopen, no processes).
+#   ifndef FC_OS_LINUX
+#   define FC_OS_LINUX
+#   endif
+#   ifndef FC_OS_WASM
+#   define FC_OS_WASM
+#   endif
+// Built without -pthread (the default): std::thread cannot start a thread.
+#   if !defined(__EMSCRIPTEN_PTHREADS__) && !defined(FC_NO_THREADS)
+#   define FC_NO_THREADS
+#   endif
 #elif defined(__NetBSD__) || defined(__FreeBSD__) || defined(__OpenBSD__)
 #   ifndef FC_OS_BSD
 #   define FC_OS_BSD
@@ -81,6 +95,16 @@
 
 #else
 #   error "FreeCAD is not ported to this OS yet. For help see www.freecad.org"
+#endif
+
+// FC_IF_THREADS(code) / FC_IF_NO_THREADS(code): for one-line differences
+// between builds with and without threads (FC_NO_THREADS, WebAssembly).
+#ifdef FC_NO_THREADS
+#   define FC_IF_THREADS(...)
+#   define FC_IF_NO_THREADS(...) __VA_ARGS__
+#else
+#   define FC_IF_THREADS(...) __VA_ARGS__
+#   define FC_IF_NO_THREADS(...)
 #endif
 
 #ifdef FC_OS_WIN32

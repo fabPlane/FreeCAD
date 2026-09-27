@@ -77,6 +77,7 @@ list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cMake")
 
 CompilerChecksAndSetups()
 ConfigureCMakeVariables()
+SetupWasm()
 InitializeFreeCADBuildOptions()
 CheckInterModuleDependencies()
 FreeCADLibpackChecks()

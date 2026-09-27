@@ -402,7 +402,7 @@ Application::Application(std::map<std::string,std::string> &mConfig)
     mpcPramManager["User parameter"] = _pcUserParamMngr;
 
     _stopRecomputeThread = false;
-    _recomputeThread = std::thread(&Application::recomputeWorker, this);
+    FC_IF_THREADS(_recomputeThread = std::thread(&Application::recomputeWorker, this);)
 
     setupPythonTypes();
 }
@@ -808,7 +808,7 @@ bool Application::isAsyncRecomputeEnabled()
         "User parameter:BaseApp/Preferences/Document"
     );
     bool enableAsyncRecompute = hGrp->GetBool("EnableAsyncRecompute", true);
-    return enableAsyncRecompute;
+    return FC_IF_NO_THREADS(false &&) enableAsyncRecompute;
 }
 
 bool Application::isFineGrainedRecomputeEnabled()
@@ -832,7 +832,7 @@ bool Application::canRecomputeRequestOnWorker(const RecomputeRequest& req) const
 
 void Application::queueRecomputeRequest(RecomputeRequest req)
 {
-    if (!canRecomputeRequestOnWorker(req)) {
+    if (FC_IF_NO_THREADS(true ||) !canRecomputeRequestOnWorker(req)) {  // no worker: inline
         RecomputeResult result;
 
         // Requests that are not worker-safe stay on the caller thread unless a

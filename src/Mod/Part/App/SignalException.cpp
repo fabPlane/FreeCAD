@@ -23,7 +23,12 @@
 
 #include "SignalException.h"
 #include <FCConfig.h>
-#if defined(__GNUC__) && defined(FC_OS_LINUX)
+// Signals -> OCCT exceptions.  Not in WebAssembly: no signal is ever
+// delivered there, and boost::stacktrace needs _Unwind_Backtrace.
+#if defined(__GNUC__) && defined(FC_OS_LINUX) && !defined(FC_OS_WASM)
+# define FC_PART_SIGNAL_EXCEPTIONS
+#endif
+#ifdef FC_PART_SIGNAL_EXCEPTIONS
 # include <array>
 # include <boost/stacktrace.hpp>
 # include <stdexcept>
@@ -56,7 +61,7 @@
 using namespace Part;
 
 // NOLINTBEGIN(concurrency-mt-unsafe, cppcoreguidelines-pro-type-member-init)
-#if defined(__GNUC__) && defined(FC_OS_LINUX)
+#ifdef FC_PART_SIGNAL_EXCEPTIONS
 static OSD_SignalMode OSD_WasSetSignal = OSD_SignalMode_AsIs;  // NOLINT
 
 static void SegvHandler(const int theSignal, siginfo_t* theSigInfo, const Standard_Address /*theContext*/)
@@ -207,13 +212,13 @@ static void setSignal(OSD_SignalMode theSignalMode)
 
 // ----------------------------------------------------------------------------
 
-#if defined(__GNUC__) && defined(FC_OS_LINUX)
+#ifdef FC_PART_SIGNAL_EXCEPTIONS
 static OSD_SignalMode currentSignalMode = OSD_SignalMode_Unset;  // NOLINT
 #endif
 
 SignalException::SignalException()
 {
-#if defined(__GNUC__) && defined(FC_OS_LINUX)
+#ifdef FC_PART_SIGNAL_EXCEPTIONS
     if (currentSignalMode == OSD_SignalMode_Unset) {
         currentSignalMode = OSD_SignalMode_Set;
         setSignal(currentSignalMode);
@@ -224,7 +229,7 @@ SignalException::SignalException()
 
 SignalException::~SignalException()
 {
-#if defined(__GNUC__) && defined(FC_OS_LINUX)
+#ifdef FC_PART_SIGNAL_EXCEPTIONS
     if (enabled && currentSignalMode == OSD_SignalMode_Set) {
         currentSignalMode = OSD_SignalMode_Unset;
         setSignal(currentSignalMode);

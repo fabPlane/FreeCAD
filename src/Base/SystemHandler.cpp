@@ -66,7 +66,9 @@ static void freecadNewHandler()
 
 #if defined(FC_OS_LINUX)
 # include <unistd.h>
-# include <execinfo.h>
+# ifndef FC_OS_WASM  // no <execinfo.h> in Emscripten's libc (HAVE_BACKTRACE_SYMBOLS is off)
+#  include <execinfo.h>
+# endif
 # include <dlfcn.h>
 # include <cxxabi.h>
 

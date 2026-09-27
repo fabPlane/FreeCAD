@@ -661,6 +661,20 @@ void initInterpreter(int argc, char* argv[])
         throw Base::RuntimeError("Failed to set config");
     }
 
+#if defined(FC_OS_WASM)
+    // WebAssembly: an isolated config ignores PYTHONHOME, and there is no
+    // executable path to derive the prefix from.  The stdlib lives in MEMFS
+    // under $PYTHONHOME (default /freecad): lib/python3XY.zip.
+    {
+        const char* home = getenv("PYTHONHOME");
+        status = PyConfig_SetBytesString(&config, &config.home, home && *home ? home : "/freecad");
+        if (PyStatus_Exception(status)) {
+            throw Base::RuntimeError("Failed to set Python home");
+        }
+        config.user_site_directory = 0;
+    }
+#endif
+
     status = Py_InitializeFromConfig(&config);
     if (PyStatus_Exception(status)) {
         throw Base::RuntimeError("Failed to init from config");
