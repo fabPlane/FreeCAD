@@ -85,6 +85,20 @@ target_compile_warn_error(FreeCADMainCmd)
 
 SET_BIN_DIR(FreeCADMainCmd FreeCADCmd)
 
+if(BUILD_API)
+    # FreeCADApiServer: the application core serving the FreeCAD API (src/Api/PROTOCOL.md)
+    add_executable(FreeCADApiServer MainApi.cpp)
+    target_include_directories(FreeCADApiServer PRIVATE ${CMAKE_SOURCE_DIR}/src ${CMAKE_BINARY_DIR}/src)
+    target_link_libraries(FreeCADApiServer FreeCADApiCore ${FreeCADMainCmd_LIBS})
+    target_compile_warn_error(FreeCADApiServer)
+    SET_BIN_DIR(FreeCADApiServer FreeCADApiServer)
+    if(APPLE AND NOT BUILD_WITH_CONDA)
+        INSTALL(TARGETS FreeCADApiServer RUNTIME DESTINATION MacOS)
+    else()
+        INSTALL(TARGETS FreeCADApiServer RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
+    endif()
+endif(BUILD_API)
+
 if(WIN32)
     INSTALL(TARGETS FreeCADMainCmd
         RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
