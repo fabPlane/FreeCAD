@@ -66,7 +66,11 @@
 #     and the data-exchange toolkits FreeCAD's Part needs are added one by
 #     one with BUILD_ADDITIONAL_TOOLKITS - enabling the DataExchange MODULE
 #     would drag in TKXCAF -> TKVCAF -> TKV3d/TKService (Visualization) and
-#     FreeType.
+#     FreeType.  Patched (tools/wasm/patches/) to drop OCC_CONVERT_SIGNALS:
+#     it puts a setjmp into every OCC_CATCH_SIGNALS, and LLVM emits INVALID
+#     wasm ("br_table: label arity inconsistent", first seen in
+#     ShapeUpgrade_ShapeDivide::Perform) for functions mixing that setjmp
+#     with legacy wasm EH.  Signals are never delivered in wasm anyway.
 #
 #  8. FreeType + HarfBuzz ARE needed: Part/App/Geometry.cpp's text-to-edges
 #     code includes them unconditionally (FREECAD_USE_FREETYPE only governs
@@ -421,6 +425,13 @@ EOF
 
     ls "$WASM_PREFIX/lib/libpython$PY_MM.a" "$WASM_PREFIX/include/python$PY_MM/Python.h" >/dev/null
 
+    # _decimal and pyexpat are compiled into libpython, but the bundled
+    # libmpdec and expat they call stay in archives of their own that
+    # `make install` does not install.  Without them the final link fails
+    # with ~450 undefined mpd_* / PyExpat_XML_* symbols.
+    cp "$bld/Modules/_decimal/libmpdec/libmpdec.a" "$WASM_PREFIX/lib/libpython$PY_MM-mpdec.a"
+    cp "$bld/Modules/expat/libexpat.a"              "$WASM_PREFIX/lib/libpython$PY_MM-expat.a"
+
     # The stdlib for MEMFS: a zip, found by default on sys.path as
     # <prefix>/lib/python311.zip once PYTHONHOME is set (the module mounts it
     # at /freecad/lib/python311.zip).  Bytecode is compiled by the host
@@ -472,6 +483,12 @@ stage_qt() {
 # ---------------------------------------------------------------------------
 stage_occt() {
     fetch_git https://github.com/Open-Cascade-SAS/OCCT "V${OCCT_VERSION//./_}" "occt-$OCCT_VERSION"
+    # No OCC_CONVERT_SIGNALS (and no -fexceptions) under Emscripten: see the
+    # patch.  Applied in place, once.
+    if ! grep -q "EMSCRIPTEN" "$WASM_SRC/occt-$OCCT_VERSION/adm/cmake/occt_defs_flags.cmake"; then
+        patch -p1 -d "$WASM_SRC/occt-$OCCT_VERSION" \
+            < "$HERE/patches/occt-$OCCT_VERSION-emscripten-no-signal-conversion.patch"
+    fi
     cmake_dep occt "$WASM_SRC/occt-$OCCT_VERSION" \
         -DBUILD_LIBRARY_TYPE=Static \
         -DINSTALL_DIR="$WASM_PREFIX" \

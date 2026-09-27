@@ -1,0 +1,15 @@
+--- a/adm/cmake/occt_defs_flags.cmake	2026-09-27 21:26:00.670290804 +0000
++++ b/adm/cmake/occt_defs_flags.cmake	2026-09-27 21:26:00.684329894 +0000
+@@ -26,6 +26,12 @@
+ 
+ if (MSVC)
+   add_definitions (-D_CRT_SECURE_NO_WARNINGS -D_CRT_NONSTDC_NO_DEPRECATE)
++elseif (EMSCRIPTEN)
++  # WebAssembly: exceptions come from -fwasm-exceptions in the toolchain flags
++  # (plain -fexceptions would ask for JavaScript-based EH), and no signal is
++  # ever delivered, so OCC_CONVERT_SIGNALS - setjmp in every OCC_CATCH_SIGNALS
++  # - buys nothing.  Worse, LLVM emits invalid wasm (br_table arity) for some
++  # functions that mix that setjmp with legacy wasm EH.
+ else()
+   set (CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fexceptions -fPIC")
+   set (CMAKE_C_FLAGS   "${CMAKE_C_FLAGS}   -fexceptions -fPIC")
