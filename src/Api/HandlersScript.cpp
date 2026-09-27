@@ -6,6 +6,7 @@
 #include <fstream>
 #include <iterator>
 #include <set>
+#include <vector>
 
 #include <Base/FileInfo.h>
 #include <Base/Interpreter.h>
@@ -151,6 +152,35 @@ Json runPython(const std::string& code, const std::string& mode)
     return reply;
 }
 
+/**
+ * The modules registered for a file type, then Part for the B-rep formats it reads and writes
+ * itself. A build without a registered module (the WebAssembly one has no Import module)
+ * still handles STEP, IGES, BREP and STL through Part.
+ */
+std::vector<std::string> ioModules(std::vector<std::string> registered, const std::string& ext)
+{
+    static const std::set<std::string> partFormats
+        = {"step", "stp", "iges", "igs", "brep", "brp", "stl"};
+    if (partFormats.contains(ext)
+        && std::find(registered.begin(), registered.end(), "Part") == registered.end()) {
+        registered.emplace_back("Part");
+    }
+    return registered;
+}
+
+/// Import the first of `modules` that loads; ApiError when none does.
+PyObject* importFirst(const std::vector<std::string>& modules, const std::string& what)
+{
+    std::string errors;
+    for (const auto& name : modules) {
+        if (PyObject* module = PyImport_ImportModule(name.c_str())) {
+            return module;
+        }
+        errors += pythonErrorText();
+    }
+    throw ApiError(Status::Failed, "No module for " + what + " could be loaded\n" + errors);
+}
+
 std::string extensionOf(const std::string& fileName)
 {
     std::string ext = Base::FileInfo(fileName).extension();
@@ -194,7 +224,10 @@ void registerScriptCommands(Server& server)
                     static_cast<std::streamsize>(data.size())
                 );
             }
-            const auto modules = App::GetApplication().getImportModules(extensionOf(path));
+            const auto modules = ioModules(
+                App::GetApplication().getImportModules(extensionOf(path)),
+                extensionOf(path)
+            );
             if (modules.empty()) {
                 throw ApiError(Status::BadRequest, "No importer for '" + extensionOf(path) + "' files");
             }
@@ -203,10 +236,7 @@ void registerScriptCommands(Server& server)
                 before.insert(obj);
             }
             AutoTransaction transaction(doc, "Import");
-            PyRef mod(PyImport_ImportModule(modules.front().c_str()));
-            if (!mod) {
-                throw ApiError(Status::Failed, pythonErrorText());
-            }
+            PyRef mod(importFirst(modules, "importing '" + extensionOf(path) + "'"));
             PyRef result(PyObject_CallMethod(mod.p, "insert", "ss", path.c_str(), doc->getName()));
             if (!result) {
                 throw ApiError(Status::Failed, pythonErrorText());
@@ -228,7 +258,7 @@ void registerScriptCommands(Server& server)
             App::Document* doc = requireDocument(params);
             std::string format = requireString(params, "format");
             std::transform(format.begin(), format.end(), format.begin(), ::tolower);
-            const auto modules = App::GetApplication().getExportModules(format);
+            const auto modules = ioModules(App::GetApplication().getExportModules(format), format);
             if (modules.empty()) {
                 throw ApiError(Status::BadRequest, "No exporter for '" + format + "'");
             }
@@ -251,10 +281,7 @@ void registerScriptCommands(Server& server)
             const std::string fileName = std::string(doc->getName()) + "." + format;
             const std::string dir = makeTempDir("export");
             const std::string path = dir + "/" + fileName;
-            PyRef mod(PyImport_ImportModule(modules.front().c_str()));
-            if (!mod) {
-                throw ApiError(Status::Failed, pythonErrorText());
-            }
+            PyRef mod(importFirst(modules, "exporting '" + format + "'"));
             PyRef result(PyObject_CallMethod(mod.p, "export", "Os", list.p, path.c_str()));
             if (!result) {
                 throw ApiError(Status::Failed, pythonErrorText());
