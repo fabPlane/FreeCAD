@@ -9,7 +9,7 @@
 #   tools/wasm/build-deps.sh list         # stages and whether each is done
 #
 # Stages (in dependency order):
-#   zlib eigen fmt yamlcpp icu xerces boost python qt occt
+#   zlib eigen fmt yamlcpp icu xerces boost python qt occt freetype harfbuzz
 #
 # Everything lands under $WASM_ROOT (default /home/user/wasm-build, see env.sh):
 #   src/      downloaded tarballs (kept; they are the only thing re-used)
@@ -67,6 +67,10 @@
 #     one with BUILD_ADDITIONAL_TOOLKITS - enabling the DataExchange MODULE
 #     would drag in TKXCAF -> TKVCAF -> TKV3d/TKService (Visualization) and
 #     FreeType.
+#
+#  8. FreeType + HarfBuzz ARE needed: Part/App/Geometry.cpp's text-to-edges
+#     code includes them unconditionally (FREECAD_USE_FREETYPE only governs
+#     FT2FC.cpp).  Built here rather than as the emscripten ports (note 2).
 # ---------------------------------------------------------------------------
 
 set -euo pipefail
@@ -88,6 +92,8 @@ BOOST_VERSION=1.86.0
 PYTHON_VERSION=3.11.15      # = the native build's python3.11 (build-python must match)
 QT_VERSION=6.4.2            # = the host Qt 6 (moc/rcc)
 OCCT_VERSION=7.6.3          # = the native build's OCCT
+FREETYPE_VERSION=2.13.3
+HARFBUZZ_VERSION=8.3.0      # = Ubuntu 24.04's
 
 ICU_U="${ICU_VERSION//./_}"                 # 74_2
 ICU_MAJOR="${ICU_VERSION%%.*}"              # 74
@@ -330,12 +336,15 @@ stage_boost() {
     local src; src=$( unpack "boost_$BOOST_U.tar.bz2" "boost_$BOOST_U" )
     # b2 itself is a native program: bootstrap with the host compiler.
     ( cd "$src" && run boost-bootstrap env -u CFLAGS -u CXXFLAGS -u LDFLAGS ./bootstrap.sh )
+    # address-model=32: b2 does not know emscripten's pointer size and records
+    # 64 in the installed boost_*-config.cmake files, whose variant check
+    # then rejects every library for a 32-bit (wasm32) consumer.
     # threading=multi is needed for Boost.Thread to be built at all; with no
     # -pthread on the command line emscripten gives it its single-threaded
     # pthread stubs, which is exactly what FreeCAD's uses (mutexes) need.
     # shellcheck disable=SC2086
     ( cd "$src" && run boost-build ./b2 -j"$JOBS" -q toolset=emscripten \
-          link=static runtime-link=static threading=multi variant=release \
+          link=static runtime-link=static threading=multi variant=release address-model=32 \
           --with-program_options --with-regex --with-thread --with-date_time \
           --with-filesystem --with-system --with-atomic --with-chrono \
           cxxflags="$WASM_CXXFLAGS -std=c++17" cflags="$WASM_CFLAGS" \
@@ -350,9 +359,14 @@ stage_boost() {
 # ---------------------------------------------------------------------------
 stage_python() {
     fetch "https://www.python.org/ftp/python/$PYTHON_VERSION/Python-$PYTHON_VERSION.tar.xz"
-    local src; src=$( unpack "Python-$PYTHON_VERSION.tar.xz" "Python-$PYTHON_VERSION" )
+    # Resumable: configure alone is ~10 minutes (every probe is an emcc run),
+    # so an existing configured tree is reused.
+    local src="$WASM_BLD/Python-$PYTHON_VERSION"
     local bld="$WASM_BLD/python-build"
-    rm -rf "$bld"; mkdir -p "$bld"
+    if [ ! -f "$bld/Makefile" ]; then
+        unpack "Python-$PYTHON_VERSION.tar.xz" "Python-$PYTHON_VERSION" >/dev/null
+        rm -rf "$bld"; mkdir -p "$bld"
+    fi
 
     # Modules we cannot / do not want to build (their libraries would be
     # emscripten ports, see note 2, or they are meaningless in a browser).
@@ -384,7 +398,7 @@ py_cv_module_xxlimited=n/a
 py_cv_module_xxlimited_35=n/a
 EOF
 
-    ( cd "$bld" &&
+    [ -f "$bld/Makefile" ] || ( cd "$bld" &&
       run python-configure env CONFIG_SITE="$bld/config.site-freecad" \
           CFLAGS="$WASM_CFLAGS" LDFLAGS="$WASM_LDFLAGS" \
           ZLIB_CFLAGS="-I$WASM_PREFIX/include" ZLIB_LIBS="-L$WASM_PREFIX/lib -lz" \
@@ -395,8 +409,13 @@ EOF
           --disable-wasm-dynamic-linking --disable-wasm-pthreads \
           --disable-shared --without-pymalloc --disable-ipv6 \
           --disable-test-modules \
-          --prefix="$WASM_PREFIX" &&
-      grep -q '^MODULE_BUILDTYPE=static' Makefile &&
+          --prefix="$WASM_PREFIX" )
+    # Extension modules must be compiled INTO libpython (MODOBJS), not as
+    # shared objects: that is what configure does for Emscripten without
+    # --enable-wasm-dynamic-linking.
+    grep -q '^MODOBJS=.*Modules/zlibmodule.o' "$bld/Makefile" ||
+        die "CPython did not configure zlib as a static built-in module (see $WASM_LOGS/python-configure.log)"
+    ( cd "$bld" &&
       run python-build   emmake make -j"$JOBS" &&
       run python-install emmake make install )
 
@@ -423,7 +442,10 @@ stage_qt() {
                qmake6 -query QT_VERSION )
     [ "$host_qt" = "$QT_VERSION" ] || die "host Qt is $host_qt, need $QT_VERSION (moc/rcc must match)"
 
-    # Qt picks up the toolchain from -platform wasm-emscripten + EMSDK.
+    # Qt 6.4 finds emcc by parsing $EMSDK/.emscripten for a quoted
+    # EMSCRIPTEN_ROOT; emsdk 6 writes an expression there instead, so Qt's
+    # auto-detection runs "$EMSDK/$CFGDIR/upstream/emscripten/emcc" and
+    # fails.  Pre-seed what it would have found (QtAutoDetect.cmake).
     ( mkdir -p "$WASM_BLD/qt-build" && cd "$WASM_BLD/qt-build" &&
       run qt-configure "$src/configure" -platform wasm-emscripten \
           -qt-host-path "$WASM_QT_HOST_PATH" \
@@ -433,6 +455,10 @@ stage_qt() {
           -no-icu -no-glib -no-pch -qt-zlib -qt-pcre -qt-doubleconversion \
           -nomake examples -nomake tests -nomake benchmarks \
           -- -DQT_HOST_PATH_CMAKE_DIR="$WASM_QT_HOST_CMAKE" \
+             -DQT_AUTODETECT_WASM_IS_DONE=TRUE \
+             -DEMCC_VERSION="$WASM_EMSDK_VERSION" \
+             -DQT_EMCC_RECOMMENDED_VERSION=3.1.14 \
+             -DCMAKE_TOOLCHAIN_FILE="$EMSDK/upstream/emscripten/cmake/Modules/Platform/Emscripten.cmake" \
              -DCMAKE_C_FLAGS="$WASM_CFLAGS" -DCMAKE_CXX_FLAGS="$WASM_CXXFLAGS" \
              -DCMAKE_CXX_SCAN_FOR_MODULES=OFF &&
       run qt-build   cmake --build . -j"$JOBS" &&
@@ -468,9 +494,35 @@ stage_occt() {
 }
 
 # ---------------------------------------------------------------------------
+# FreeType + HarfBuzz (note 8)
+# ---------------------------------------------------------------------------
+stage_freetype() {
+    fetch "https://download.savannah.gnu.org/releases/freetype/freetype-$FREETYPE_VERSION.tar.xz"
+    local src; src=$( unpack "freetype-$FREETYPE_VERSION.tar.xz" "freetype-$FREETYPE_VERSION" )
+    cmake_dep freetype "$src" \
+        -DFT_REQUIRE_ZLIB=ON -DFT_DISABLE_BZIP2=ON -DFT_DISABLE_PNG=ON \
+        -DFT_DISABLE_HARFBUZZ=ON -DFT_DISABLE_BROTLI=ON \
+        -DZLIB_ROOT="$WASM_PREFIX"
+    ls "$WASM_PREFIX/lib/libfreetype.a" >/dev/null
+    cleanup "freetype-$FREETYPE_VERSION" freetype-build
+}
+
+stage_harfbuzz() {
+    fetch "https://github.com/harfbuzz/harfbuzz/releases/download/$HARFBUZZ_VERSION/harfbuzz-$HARFBUZZ_VERSION.tar.xz"
+    local src; src=$( unpack "harfbuzz-$HARFBUZZ_VERSION.tar.xz" "harfbuzz-$HARFBUZZ_VERSION" )
+    cmake_dep harfbuzz "$src" \
+        -DHB_HAVE_FREETYPE=ON -DHB_HAVE_GLIB=OFF -DHB_HAVE_ICU=OFF -DHB_HAVE_GOBJECT=OFF \
+        -DHB_BUILD_SUBSET=OFF -DHB_BUILD_UTILS=OFF -DHB_BUILD_TESTS=OFF \
+        -DFREETYPE_INCLUDE_DIRS="$WASM_PREFIX/include/freetype2" \
+        -DFREETYPE_LIBRARY="$WASM_PREFIX/lib/libfreetype.a"
+    ls "$WASM_PREFIX/lib/libharfbuzz.a" >/dev/null
+    cleanup "harfbuzz-$HARFBUZZ_VERSION" harfbuzz-build
+}
+
+# ---------------------------------------------------------------------------
 # driver
 # ---------------------------------------------------------------------------
-ALL_STAGES=(zlib eigen fmt yamlcpp icu xerces boost python qt occt)
+ALL_STAGES=(zlib eigen fmt yamlcpp icu xerces boost python qt occt freetype harfbuzz)
 STAGES=( "${@:-}" )
 [ -z "${STAGES[0]:-}" ] && STAGES=( "${ALL_STAGES[@]}" )
 
