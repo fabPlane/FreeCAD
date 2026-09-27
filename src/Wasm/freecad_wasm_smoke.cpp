@@ -175,6 +175,20 @@ int main(int /*argc*/, char** /*argv*/)
         std::printf("PartDesign Pad of a 10x10 sketch, 5 high: volume = %s\n", sketch.c_str());
         check(std::fabs(std::stod(sketch) - 500.0) < 1e-6, "pad volume == 500");
 
+        // --- data exchange (OCCT TKSTEP / TKIGES / TKSTL) in MEMFS -------------
+        std::string exchange = Base::Interpreter().runStringWithKey(
+            "import FreeCAD, Part, os\n"
+            "s = FreeCAD.getDocument('Smoke').Box.Shape\n"
+            "s.exportStep('/tmp/box.step')\n"
+            "s.exportIges('/tmp/box.igs')\n"
+            "s.exportStl('/tmp/box.stl')\n"
+            "a = Part.read('/tmp/box.step')\n"
+            "b = Part.read('/tmp/box.igs')\n"
+            "_ = '%.3f %.3f %d' % (a.Volume, b.Area, os.path.getsize('/tmp/box.stl'))\n",
+            "_");
+        std::printf("STEP volume, IGES area, STL bytes: %s\n", exchange.c_str());
+        check(exchange.rfind("6000.000 2200.000 ", 0) == 0, "STEP/IGES round trip, STL export");
+
         App::GetApplication().closeDocument("Smoke");
     }
     catch (const Base::Exception& e) {
